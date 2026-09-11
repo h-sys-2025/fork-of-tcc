@@ -55,6 +55,7 @@ static void tok_print(const int *str, const char *msg, ...);
 static void next_nomacro(void);
 static void parse_number(const char *p);
 static void parse_string(const char *p, int len);
+int skip_opt(int c);
 
 static struct TinyAlloc *toksym_alloc;
 static struct TinyAlloc *tokstr_alloc;
@@ -99,16 +100,23 @@ static const unsigned char tok_two_chars[] =
 
 ST_FUNC void skip(int c)
 {
-    if (c == ';' || tok != c || tok == '\n') {
-        //printf("';' expected, but you can skip it if you like.\n");
-        // optional
-    } else if (tok != c) {
+    if (tok != c) {
         char tmp[40];
         pstrcpy(tmp, sizeof tmp, get_tok_str(c, &tokc));
         tcc_error("'%s' expected (got '%s')", tmp, get_tok_str(tok, &tokc));
 	   }
     next();
 }
+
+ST_FUNC int skip_opt(int c)
+{
+    if (tok != c) {
+      next();
+      return 0;   
+	   }
+    return 1;
+}
+
 
 ST_FUNC void expect(const char *msg)
 {

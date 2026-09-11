@@ -9,19 +9,22 @@ typedef struct {
 } foo;
 
 void baz(foo* bar) {
-  if (bar) {
-    for (size_t i = 0; i < 100; ++i) {
-      bar.value += 1;
+  if bar {
+    for size_t i = 0; i < 100; ++i {
+      bar.value += 1
     }
   } else {
-    printf("pointer expected, you forgot to add a '&'.");
+    printf("pointer expected, you forgot to add a '&'.")
   }
 }
 
 int main() {
-  foo bar = {0};
-  baz(bar);
-  printf("hello world, value is: %d\n", bar.value);
+  foo bar;
+  baz(&bar)
+  printf("hello world, value is: %d\n", bar.value)
+  //--
+  auto x = 1234;
+  printf("%d", x)
   return 0;
-}
+}}
 ```

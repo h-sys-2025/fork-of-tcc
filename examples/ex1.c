@@ -6,8 +6,8 @@ typedef struct {
 } foo;
 
 void baz(foo* bar) {
-  if (bar) {
-    for (size_t i = 0; i < 100; ++i) {
+  if bar {
+    for size_t i = 0; i < 100; ++i {
       bar.value += 1
     }
   } else {
@@ -16,8 +16,11 @@ void baz(foo* bar) {
 }
 
 int main() {
-  foo bar = {0}
-  baz(bar)
+  foo bar;
+  baz(&bar)
   printf("hello world, value is: %d\n", bar.value)
-  return 0
+  //--
+  auto x = 1234;
+  printf("%d", x)
+  return 0;
 }

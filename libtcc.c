@@ -627,10 +627,19 @@ enum { ERROR_WARN, ERROR_NOABORT, ERROR_ERROR };
 
 static void error1(int mode, const char *fmt, va_list ap)
 {
-    BufferedFile **pf, *f;
     TCCState *s1 = tcc_state;
     CString cs;
     int line = 0;
+    BufferedFile *f = NULL;
+    
+    /* Variables for rustc-style output */
+    char *p;
+    char *line_start;
+    char *line_end;
+    int col;
+    int display_col;
+    int printed_len;
+    char *c;
 
     tcc_exit_state(s1);
 
@@ -653,31 +662,113 @@ static void error1(int mode, const char *fmt, va_list ap)
     }
 
     cstr_new(&cs);
-    if (fmt[0] == '%' && fmt[1] == 'i' && fmt[2] == ':')
-        line = va_arg(ap, int), fmt += 3;
-    f = NULL;
-    if (s1->error_set_jmp_enabled) { /* we're called while parsing a file */
+    
+    // Extract line number if format starts with %i:
+    if (fmt[0] == '%' && fmt[1] == 'i' && fmt[2] == ':') {
+        line = va_arg(ap, int);
+        fmt += 3;
+    }
+
+    // Determine current file
+    if (s1->error_set_jmp_enabled) {
         /* use upper file if inline ":asm:" or token ":paste:" */
         for (f = file; f && f->filename[0] == ':'; f = f->prev)
             ;
     }
+
     if (f) {
-        for(pf = s1->include_stack; pf < s1->include_stack_ptr; pf++)
-            cstr_printf(&cs, "In file included from %s:%d:\n",
-                (*pf)->filename, (*pf)->line_num - 1);
         if (0 == line)
             line = f->line_num - ((tok_flags & TOK_FLAG_BOL) && !macro_ptr);
-        cstr_printf(&cs, "%s:%d: ", f->filename, line);
-    } else if (s1->current_filename) {
-        cstr_printf(&cs, "%s: ", s1->current_filename);
-    } else {
-        cstr_printf(&cs, "tcc: ");
     }
-    cstr_printf(&cs, mode == ERROR_WARN ? "warning: " : "error: ");
+
+    // --- Rustc-style Formatting ---
+    
+    // 1. Error/Warning prefix and message
+    cstr_printf(&cs, "%s:%d:%d - ", f->filename, line, col);
+        
+    cstr_printf(&cs, "%s", mode == ERROR_WARN ? "warning" : "error");
+    cstr_printf(&cs, ": ");
+
     if (pp_expr > 1)
-        pp_error(&cs); /* special handler for preprocessor expression errors */
+        pp_error(&cs);
     else
         cstr_vprintf(&cs, fmt, ap);
+
+    // 2. Location and Line Content
+    // Check f->buf_ptr instead of f->buffer (array address is always true)
+    if (f && f->buf_ptr) {
+        p = (char *)f->buf_ptr;
+        
+        // If buf_ptr is exactly at a newline, step back to evaluate the line that just finished
+        if (p > (char *)f->buffer && (p[-1] == '\n' || p[-1] == '\r')) {
+            p--;
+        }
+        
+        // Find start of the current line
+        line_start = p;
+        while (line_start > (char *)f->buffer && line_start[-1] != '\n' && line_start[-1] != '\r') {
+            line_start--;
+        }
+        
+        // Find end of the current line
+        line_end = p;
+        while (*line_end != '\n' && *line_end != '\r' && *line_end != '\0') {
+            line_end++;
+        }
+
+        // Calculate character column and visual display column (tabs = 4 spaces)
+        col = 1;
+        display_col = 1;
+        for (c = line_start; c < p && c < line_end; c++) {
+            col++;
+            if (*c == '\t')
+                display_col += 4;
+            else
+                display_col += 1;
+        }
+        
+        // Clamp display column to prevent terminal breakage on massive minified lines
+        if (display_col > 300) display_col = 300;
+
+        // Print rustc-style location header
+        cstr_printf(&cs, "\n     |");
+        cstr_printf(&cs, "\n%4d | ", line);
+
+        // Print the actual line content, sanitizing non-printables and expanding tabs
+        printed_len = 0;
+        for (c = line_start; c < line_end && printed_len < 300; c++) {
+            if (*c == '\t') {
+                cstr_printf(&cs, "    ");
+                printed_len += 4;
+            } else if (*c >= 32 && *c < 127) {
+                cstr_printf(&cs, "%c", *c);
+                printed_len++;
+            } else {
+                cstr_printf(&cs, " "); // Replace non-printable with space
+                printed_len++;
+            }
+        }
+
+        // Print the caret pointing to the error location
+        cstr_printf(&cs, "\n     |");
+        for (int i = 1; i < display_col; i++) {
+            cstr_printf(&cs, " ");
+        }
+        cstr_printf(&cs, "^");
+        
+    } else {
+        // Fallback if file buffer is not available (e.g., command-line string evaluation)
+        cstr_printf(&cs, "\n --> ");
+        if (f) {
+            cstr_printf(&cs, "%s:%d", f->filename, line);
+        } else if (s1->current_filename) {
+            cstr_printf(&cs, "%s", s1->current_filename);
+        } else {
+            cstr_printf(&cs, "<unknown>:0");
+        }
+    }
+
+    // --- Output Handling ---
     if (!s1->error_func) {
         /* default case: stderr */
         if (s1 && s1->output_type == TCC_OUTPUT_PREPROCESS && s1->ppfp == stdout)
@@ -688,9 +779,12 @@ static void error1(int mode, const char *fmt, va_list ap)
     } else {
         s1->error_func(s1->error_opaque, (char*)cs.data);
     }
+    
     cstr_free(&cs);
+
     if (mode != ERROR_WARN)
         s1->nb_errors++;
+        
     if (mode == ERROR_ERROR && s1->error_set_jmp_enabled) {
         while (nb_stk_data)
             tcc_free(*(void**)stk_data[--nb_stk_data]);

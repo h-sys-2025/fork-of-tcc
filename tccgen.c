@@ -72,6 +72,7 @@ ST_DATA CType func_vt; /* current function return type (used by return instructi
 ST_DATA int func_var; /* true if current function is variadic (used by return instruction) */
 ST_DATA int func_vc; /* stack address for implicit struct return storage */
 ST_DATA int func_ind; /* function start address */
+ST_DATA int skip_opt(int c);
 static int func_old;
 ST_DATA const char *funcname;
 ST_DATA CType int_type, func_old_type, char_type, char_pointer_type;
@@ -4143,7 +4144,7 @@ static Sym * find_field (CType *type, int v, int *cumofs)
     Sym *s = type->ref;
     int v1 = v | SYM_FIELD;
     if (!(v & SYM_FIELD)) { /* top-level call */
-        if ((type->t & VT_BTYPE) == VT_PTR)
+        if ((type->t & VT_BTYPE) == VT_PTR) /*For automatic pointer de-ref using '.'*/
             indir();
         else if ((type->t & VT_BTYPE) != VT_STRUCT)
             expect("struct or union");
@@ -5389,14 +5390,24 @@ static void parse_expr_type(CType *type)
     int n;
     AttributeDef ad;
 
-    skip('(');
+    if (tok == ')')
+        perror("stale ')'");
+    if (tok != '(')
+        perror("expected '('");
+    next();
+
     if (parse_btype(type, &ad, 0)) {
         type_decl(type, &ad, &n, TYPE_ABSTRACT);
     } else {
         expr_type(type, gexpr);
     }
-    skip(')');
-}
+
+    if (tok == '(')
+        perror("stale '('");
+    if (tok != ')')
+        perror("unclosed '('");
+    next();
+}   
 
 static void parse_type(CType *type)
 {
@@ -7185,7 +7196,8 @@ static void block(int flags)
     int a, b, c, d, e, t;
     struct scope o;
     Sym *s;
-
+    int bo = 0;
+    
 again:
     t = tok;
     /* If the token carries a value, next() might destroy it. Only with
@@ -7198,11 +7210,15 @@ again:
         tcc_tcov_check_line (tcc_state, 0), tcc_tcov_block_begin (tcc_state);
 
     if (t == TOK_IF) {
+        bo = 0;
         new_scope_s(&o);
-        skip('(');
+        if (tok == '(') {
+          skip('(');
+          bo = 1;
+        }
         gexpr_decl();
         a = gvtst(1, 0);
-        skip(')');
+        if (bo == 1) skip(')');
         block(0);
         if (tok == TOK_ELSE) {
             d = gjmp(0);
@@ -7216,12 +7232,16 @@ again:
         prev_scope_s(&o);
 
     } else if (t == TOK_WHILE) {
+        bo = 0;
         new_scope_s(&o);
         d = gind();
-        skip('(');
+        if (tok == '(') {
+          skip('(');
+          bo = 1;
+        }
         gexpr();
         a = gvtst(1, 0);
-        skip(')');
+        if (bo == 1) skip(')');
         b = 0;
         lblock(&a, &b);
         gjmp_addr(d);
@@ -7243,7 +7263,7 @@ again:
                 label_push(&local_label_stack, tok, LABEL_DECLARED);
                 next();
             } while (tok == ',');
-            skip(';');
+            if (tok == ';') skip(';');
         }
 
         while (tok != '}') {
@@ -7281,7 +7301,9 @@ again:
         leave_scope(root_scope);
         if (b)
             gfunc_return(&func_vt);
-        skip(';');
+        
+        if (tok == ';') skip(';');
+        
         /* jump unless last stmt in top-level block */
         if (tok != '}' || local_scope != 1)
             rsym = gjmp(rsym);
@@ -7298,7 +7320,7 @@ again:
         else
             leave_scope(loop_scope);
         *cur_scope->bsym = gjmp(*cur_scope->bsym);
-        skip(';');
+        if (tok == ';') skip(';');
 
     } else if (t == TOK_CONTINUE) {
         /* compute jump */
@@ -7306,12 +7328,17 @@ again:
             tcc_error("cannot continue");
         leave_scope(loop_scope);
         *cur_scope->csym = gjmp(*cur_scope->csym);
-        skip(';');
+        if (tok == ';') skip(';');
 
     } else if (t == TOK_FOR) {
+        bo = 0;
+        
         new_scope(&o);
 
-        skip('(');
+        if (tok == '(') {
+          skip('(');
+          bo = 1;
+        }
         if (tok != ';') {
             /* c99 for-loop init decl? */
             if (!decl(VT_JMP)) {
@@ -7336,7 +7363,7 @@ again:
             gjmp_addr(c);
             gsym(e);
         }
-        skip(')');
+        if (bo == 1) skip(')');
         lblock(&a, &b);
         gjmp_addr(d);
         gsym_addr(b, d);
@@ -7344,22 +7371,31 @@ again:
         prev_scope(&o, 0);
 
     } else if (t == TOK_DO) {
+        bo = 0;
+        
         new_scope_s(&o);
         a = b = 0;
         d = gind();
         lblock(&a, &b);
         gsym(b);
         skip(TOK_WHILE);
-        skip('(');
-	gexpr();
+        
+        if (tok == '(') {
+          skip('(');
+          bo = 1;
+        }
+        
+        gexpr();
         c = gvtst(0, 0);
-        skip(')');
+        if (bo == 1) skip(')');
         skip(';');
 	gsym_addr(c, d);
         gsym(a);
         prev_scope_s(&o);
 
     } else if (t == TOK_SWITCH) {
+        bo = 0;
+        
         struct switch_t *sw;
 
         sw = tcc_mallocz(sizeof *sw);
@@ -7370,11 +7406,18 @@ again:
         cur_switch = sw;
 
         new_scope_s(&o);
-        skip('(');
+
+        if (tok == '(') {
+          skip('(');
+          bo = 1;
+        }
+        
         gexpr_decl();
         if (!is_integer_btype(vtop->type.t & VT_BTYPE))
             tcc_error("switch value not an integer");
-        skip(')');
+
+        if (bo == 1) skip(')');
+
         sw->sv = *vtop--; /* save switch value */
         a = 0;
         b = gjmp(0); /* jump to first case */
@@ -7466,7 +7509,7 @@ again:
         } else {
             expect("label identifier");
         }
-        skip(';');
+        if (tok == ';') skip(';');
 
     } else if (t == TOK_ASM1 || t == TOK_ASM2 || t == TOK_ASM3) {
         asm_instr();
@@ -7521,7 +7564,7 @@ again:
                     gexpr();
                     vpop();
                 }
-                skip(';');
+                if (tok == ';') skip(';');
             }
         }
     }
