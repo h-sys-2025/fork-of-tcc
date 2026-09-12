@@ -1,6 +1,8 @@
 #!/usr/local/bin/tcc -run
 #include <tcclib.h>
 
+typedef var auto;
+typedef let const auto;
 typedef struct {
   int value;
 } foo;
@@ -10,8 +12,6 @@ void baz(foo* bar) {
     for size_t i = 0; i < 100; ++i {
       bar.value += 1
     }
-  } else {
-    printf("pointer expected, you forgot to add a '&'.")
   }
 }
 
@@ -20,7 +20,8 @@ int main() {
   baz(&bar)
   printf("hello world, value is: %d\n", bar.value)
   //--
-  auto x = 1234;
-  printf("%d", x)
+  var x = 1234;
+  let y = x+2;
+  printf("x=%d y=%d", x, y)
   return 0;
 }

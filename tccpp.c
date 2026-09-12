@@ -98,13 +98,14 @@ static const unsigned char tok_two_chars[] =
     0
 };
 
-ST_FUNC void skip(int c)
-{
-    if (tok != c) {
+ST_FUNC void skip(int c) {
+    if (tok != c && c == ';') {
+        next();
+    } else if (tok != c) {
         char tmp[40];
         pstrcpy(tmp, sizeof tmp, get_tok_str(c, &tokc));
         tcc_error("'%s' expected (got '%s')", tmp, get_tok_str(tok, &tokc));
-	   }
+    }
     next();
 }
 
@@ -112,7 +113,7 @@ ST_FUNC int skip_opt(int c)
 {
     if (tok != c) {
       next();
-      return 0;   
+      return 0;
 	   }
     return 1;
 }
